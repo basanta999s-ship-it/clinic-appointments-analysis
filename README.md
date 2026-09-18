@@ -46,8 +46,17 @@ The notebook works through six steps, in order:
    missing values collapsed into `Other`.
    Result: 477 Female / 473 Male / 50 Other.
 3. **Date standardization** — parse `appointment_date` and `booking_date` into real
-   `datetime64` columns. *(See [Known limitations](#known-limitations) — this step currently
-   drops about half the dates.)*
+   `datetime64` columns. Both hold two competing formats, so each is parsed separately and the
+   results combined — a single `pd.to_datetime` pass would infer one format and coerce the
+   other half to `NaT`:
+
+   ```python
+   slash  = pd.to_datetime(df[col], format='%m/%d/%Y', errors='coerce')
+   dashed = pd.to_datetime(df[col], format='%d-%b-%y', errors='coerce')
+   df[col] = slash.fillna(dashed)
+   ```
+
+   Result: **1000 / 1000** parsed for both columns.
 4. **Billing cleanup** — strip every non-numeric character with a regex and cast to `float`.
    Result: mean billing amount **£276.12** (currency symbols were discarded, so amounts are
    treated as a single unit).
@@ -109,27 +118,6 @@ follow-up; 65+ the most — but the spread is modest.
 
 ## Known limitations
 
-**Date parsing loses roughly half the rows.** Step 3 calls:
-
-```python
-pd.to_datetime(df[col], errors='coerce', dayfirst=False)
-```
-
-on a column holding two formats. pandas infers a single format from the first value and coerces
-everything that doesn't match to `NaT`. The result:
-
-- `appointment_date`: **494 / 1000** parsed
-- `booking_date`: **514 / 1000** parsed
-
-Any downstream analysis of wait times or seasonality would be running on half the data. A fix is
-to parse each format separately and combine:
-
-```python
-a = pd.to_datetime(df[col], format='%m/%d/%Y', errors='coerce')
-b = pd.to_datetime(df[col], format='%d-%b-%y', errors='coerce')
-df[col] = a.fillna(b)
-```
-
 **Currency symbols are discarded, not converted.** `£425.8`, `€344.26`, and `Rs85.76` are all
 reduced to bare numbers and averaged together. The reported mean of 276.12 mixes four currencies
 and is therefore not a real monetary figure. Treat it as a unitless magnitude unless the symbols
@@ -138,6 +126,10 @@ are mapped to a common currency first.
 **`patient_id` is not a primary key.** 101 IDs across 1,000 rows means repeat visits (or
 synthetic ID reuse). `drop_duplicates()` finds nothing because full rows differ, but any
 per-patient aggregation needs a `groupby('patient_id')`, not a row count.
+
+**The date columns are cleaned but not yet analyzed.** With both columns now fully parsed,
+`appointment_date - booking_date` gives a booking lead time for all 1,000 rows — an obvious
+next step that this notebook doesn't take.
 
 ---
 
